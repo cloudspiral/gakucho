@@ -116,10 +116,18 @@ plist, runner, helper, logs, and workspace before enabling Gakucho. Start the
 Gakucho service only after the old label is unloaded and no ready-labeled issue
 is waiting. To roll back:
 
-1. `gakucho stop owner/repo` and then `gakucho remove owner/repo`.
-2. Restore the archived helper and LaunchAgent plist to their original paths.
-3. Restore only the archived helper-specific Codex rules.
-4. Bootstrap the old LaunchAgent and verify its dashboard before routing work.
+1. `gakucho stop owner/repo`.
+2. If the repository workflow still calls `gakucho git-handoff`, keep the
+   disabled registry entry; restore the archived LaunchAgent plist and bootstrap
+   it only after confirming the Gakucho service is unloaded.
+3. For a full Gakucho removal, first restore and publish the pre-migration
+   workflow/helper contract. Then restore the archived helper and only its exact
+   Codex rules, run `gakucho remove owner/repo`, and bootstrap the old LaunchAgent.
+4. Verify the legacy dashboard and an inert ready queue before routing work.
+
+Do not remove a registry entry while its active workflow still depends on the
+central Gakucho handoff: the guard intentionally rejects unregistered
+workspaces.
 
 Gakucho never deletes legacy logs or workspaces, so those remain available for
 forensics and rollback.
