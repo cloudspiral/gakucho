@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { GakuchoError } from "./errors.ts";
 import { normalizeRepoIdentity } from "./project-ref.ts";
 import { run } from "./process.ts";
@@ -20,6 +21,29 @@ const labels = [
     description: "Agent run requires human input or external access",
   },
 ] as const;
+
+export function parseGitHubJson<T>(source: string, context: string): T {
+  if (!source.trim()) throw new GakuchoError(`GitHub returned an empty JSON response while ${context}.`);
+  try {
+    return JSON.parse(source) as T;
+  } catch (error) {
+    throw new GakuchoError(`GitHub returned invalid JSON while ${context}: ${String(error)}`);
+  }
+}
+
+async function ghJson<T>(args: readonly string[], context: string): Promise<T> {
+  let latest: GakuchoError | undefined;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = await run("gh", args);
+    try {
+      return parseGitHubJson<T>(result.stdout, context);
+    } catch (error) {
+      latest = error as GakuchoError;
+      if (attempt < 3) await delay(attempt * 250);
+    }
+  }
+  throw new GakuchoError(`${latest?.message ?? `GitHub JSON failed while ${context}.`} Retried 3 times.`);
+}
 
 export async function authenticatedOwner(): Promise<string> {
   const result = await run("gh", ["api", "user", "--jq", ".login"]);
@@ -60,7 +84,7 @@ export async function createRepository(
 
 export async function ensureLabels(repo: string): Promise<string[]> {
   const normalized = normalizeRepoIdentity(repo);
-  const current = await run("gh", [
+  const current = await ghJson<Array<{ name: string }>>([
     "label",
     "list",
     "--repo",
@@ -69,9 +93,9 @@ export async function ensureLabels(repo: string): Promise<string[]> {
     "1000",
     "--json",
     "name",
-  ]);
+  ], `listing labels for ${normalized}`);
   const existing = new Set(
-    (JSON.parse(current.stdout) as Array<{ name: string }>).map((label) => label.name.toLowerCase()),
+    current.map((label) => label.name.toLowerCase()),
   );
   const created: string[] = [];
   for (const label of labels) {
@@ -93,17 +117,21 @@ export async function ensureLabels(repo: string): Promise<string[]> {
 }
 
 export async function verifyIssuesEnabled(repo: string): Promise<void> {
-  const result = await run("gh", ["repo", "view", normalizeRepoIdentity(repo), "--json", "hasIssuesEnabled"]);
-  const payload = JSON.parse(result.stdout) as { hasIssuesEnabled?: boolean };
+  const normalized = normalizeRepoIdentity(repo);
+  const payload = await ghJson<{ hasIssuesEnabled?: boolean }>(
+    ["repo", "view", normalized, "--json", "hasIssuesEnabled"],
+    `checking issue settings for ${normalized}`,
+  );
   if (!payload.hasIssuesEnabled) throw new GakuchoError(`GitHub Issues are disabled for ${repo}.`);
 }
 
 export async function readyIssueCount(repo: string): Promise<number> {
-  const result = await run("gh", [
+  const normalized = normalizeRepoIdentity(repo);
+  const result = await ghJson<unknown[]>([
     "issue",
     "list",
     "--repo",
-    normalizeRepoIdentity(repo),
+    normalized,
     "--state",
     "open",
     "--label",
@@ -112,8 +140,8 @@ export async function readyIssueCount(repo: string): Promise<number> {
     "100",
     "--json",
     "number",
-  ]);
-  return (JSON.parse(result.stdout) as unknown[]).length;
+  ], `listing ready issues for ${normalized}`);
+  return result.length;
 }
 
 export async function createTask(

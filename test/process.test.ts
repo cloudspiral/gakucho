@@ -3,6 +3,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { redactSecrets, run } from "../src/process.ts";
+import { parseGitHubJson } from "../src/github.ts";
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -27,5 +28,15 @@ describe("subprocess boundary", () => {
         env: { PATH: root, GITHUB_TOKEN: token },
       })).rejects.toThrow(`${command} failed: [REDACTED]`);
     }
+  });
+});
+
+describe("GitHub response diagnostics", () => {
+  test("adds operation context to empty and malformed JSON", () => {
+    expect(() => parseGitHubJson("", "listing labels for owner/repo"))
+      .toThrow("empty JSON response while listing labels for owner/repo");
+    expect(() => parseGitHubJson("{", "checking issue settings"))
+      .toThrow("invalid JSON while checking issue settings");
+    expect(parseGitHubJson<{ ok: boolean }>('{"ok":true}', "testing")).toEqual({ ok: true });
   });
 });

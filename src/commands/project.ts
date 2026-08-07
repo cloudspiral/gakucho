@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { ActionPlan } from "../action-plan.ts";
 import { loadConfig, writeConfig } from "../config.ts";
-import { GakuchoError } from "../errors.ts";
+import { GakuchoError, errorMessage } from "../errors.ts";
 import { createInitialCommit, gitRepoIdentity, gitRoot, initializeRepository, requireCleanFile } from "../git.ts";
 import {
   authenticatedOwner,
@@ -101,12 +101,58 @@ export async function newProject(path: string, options: NewOptions): Promise<Pro
     .add("service", options.start ? "start and probe Symphony" : "leave the watcher stopped");
   if (options.dryRun) return plan;
 
-  await scaffoldNew(target, repo, options.profile);
-  await initializeRepository(target);
-  await createInitialCommit(target, repoName, options.profile);
-  await createRepository(repo, target, visibility);
-  await ensureLabels(repo);
-  return await addProject(target, { ...(options.start ? { start: true } : {}), port });
+  const completed: string[] = [];
+  let stage = "scaffolding and baseline validation";
+  let initialCommitCreated = false;
+  let remoteCreated = false;
+  try {
+    await scaffoldNew(target, repo, options.profile);
+    completed.push("local scaffold and baseline checks");
+    stage = "initializing Git and creating the initial commit";
+    await initializeRepository(target);
+    await createInitialCommit(target, repoName, options.profile);
+    initialCommitCreated = true;
+    completed.push("local main branch and initial commit");
+    stage = `creating and pushing ${repo}`;
+    await createRepository(repo, target, visibility);
+    remoteCreated = true;
+    completed.push(`GitHub repository ${repo} and pushed main branch`);
+    stage = "creating standard GitHub labels";
+    await ensureLabels(repo);
+    completed.push("standard GitHub labels");
+    stage = "registering the project and generating runtime files";
+    return await addProject(target, { ...(options.start ? { start: true } : {}), port });
+  } catch (error) {
+    const current = await loadConfig().catch(() => config);
+    const registered = current.projects[repo] !== undefined;
+    const recovery: string[] = [];
+    if (registered) {
+      recovery.push(`gakucho doctor ${repo}`);
+      if (options.start) recovery.push(`gakucho start ${repo}`);
+    } else if (remoteCreated) {
+      recovery.push(`gakucho add ${target}${options.start ? " --start" : ""}`);
+    } else if (initialCommitCreated) {
+      recovery.push(`gh repo view ${repo}`);
+      recovery.push(`If absent: gh repo create ${repo} --${visibility} --source ${target} --remote origin --push`);
+      recovery.push(`If present: git -C ${target} push -u origin main`);
+      recovery.push(`gakucho add ${target}${options.start ? " --start" : ""}`);
+    } else {
+      const contract = options.profile === "bun"
+        ? "bun install && bun run check"
+        : options.profile === "python-uv"
+        ? "uv lock && uv sync --frozen && uv run ruff check . && uv run pytest"
+        : "verify the generated factory files";
+      recovery.push(`Resolve the reported failure, then run in ${target}: ${contract}`);
+      recovery.push(`Rerun creation from a new empty path, or finish Git/GitHub setup manually and run gakucho add ${target}.`);
+    }
+    throw new GakuchoError([
+      `Failed while ${stage}: ${errorMessage(error)}`,
+      `Completed: ${completed.length > 0 ? completed.join("; ") : "no full stage"}.`,
+      `Preserved local state: ${target}. Gakucho never deletes a partially created remote repository.`,
+      "Recovery:",
+      ...recovery.map((command) => `- ${command}`),
+    ].join("\n"));
+  }
 }
 
 export async function initProject(path: string, profile: Profile, dryRun = false): Promise<string[] | ActionPlan> {
