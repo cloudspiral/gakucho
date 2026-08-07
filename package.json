@@ -1,0 +1,43 @@
+{
+  "name": "gakucho",
+  "version": "0.1.0",
+  "description": "A thin macOS control CLI for running one OpenAI Symphony instance per GitHub repository.",
+  "type": "module",
+  "bin": {
+    "gakucho": "./bin/gakucho"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun test"
+  },
+  "keywords": [
+    "openai",
+    "symphony",
+    "codex",
+    "github",
+    "launchd"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cloudspiral/gakucho.git"
+  },
+  "homepage": "https://github.com/cloudspiral/gakucho#readme",
+  "bugs": "https://github.com/cloudspiral/gakucho/issues",
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "os": [
+    "darwin"
+  ],
+  "dependencies": {
+    "commander": "^14.0.0",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.21",
+    "typescript": "^5.9.2"
+  }
+}
